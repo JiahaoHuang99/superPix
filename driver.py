@@ -5,8 +5,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from skimage.segmentation._slic import _enforce_label_connectivity_cython
 import kornia
-# CODE IS BASED ON ss-with-RIM (Suzuki,2020): https://github.com/DensoITLab/ss-with-RIM
 
+
+# CODE IS BASED ON ss-with-RIM (Suzuki,2020): https://github.com/DensoITLab/ss-with-RIM
 
 
 class UnNormalize(object):
@@ -26,6 +27,7 @@ class UnNormalize(object):
             # The normalize code -> t.sub_(m).div_(s)
         return tensor
 
+
 def conv_in_relu(in_c, out_c, kernel_size=3, stride=1):
     return nn.Sequential(
         nn.ReflectionPad2d(kernel_size // 2),
@@ -34,103 +36,6 @@ def conv_in_relu(in_c, out_c, kernel_size=3, stride=1):
         nn.ReLU(inplace=True)
     )
 
-
-def upconv_in_relu(in_c, out_c, kernel_size=3, stride=1):
-    return nn.Sequential(
-        nn.ConvTranspose2d(in_c, out_c, kernel_size, stride=stride, bias=False, padding=kernel_size // 2,
-                           output_padding=kernel_size // 2),
-        nn.InstanceNorm2d(out_c, affine=True),
-        nn.ReLU(inplace=True)
-    )
-
-
-class DeepLabHeadV3Plus(nn.Module):
-    def __init__(self, in_channels, low_level_channels, num_classes, aspp_dilate=[12, 24, 36]):
-        super(DeepLabHeadV3Plus, self).__init__()
-        self.project = nn.Sequential(
-            nn.Conv2d(low_level_channels, 48, 1, bias=False),
-            nn.InstanceNorm2d(48),
-            nn.ReLU(inplace=True),
-        )
-
-        self.aspp = ASPP(in_channels, aspp_dilate)
-
-        self.classifier = nn.Sequential(
-            nn.Conv2d(304, 256, 3, padding=1, bias=False),
-            nn.InstanceNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, num_classes, 1)
-        )
-        self._init_weight()
-
-    def forward(self, feature):
-        low_level_feature = self.project(feature['low_level'])
-        output_feature = self.aspp(feature['out'])
-        output_feature = F.interpolate(output_feature, size=low_level_feature.shape[2:], mode='bilinear',
-                                       align_corners=False)
-        return self.classifier(torch.cat([low_level_feature, output_feature], dim=1))
-
-    def _init_weight(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
-            elif isinstance(m, (nn.InstanceNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-
-class DeepLabHead(nn.Module):
-    def __init__(self, in_channels, num_classes, aspp_dilate=[12, 24, 36]):
-        super(DeepLabHead, self).__init__()
-
-        self.classifier = nn.Sequential(
-            ASPP(in_channels, aspp_dilate),
-            nn.Conv2d(256, 256, 3, padding=1, bias=False),
-            nn.InstanceNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, num_classes, 1)
-        )
-        self._init_weight()
-
-    def forward(self, feature):
-        return self.classifier(feature['out'])
-
-    def _init_weight(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
-            elif isinstance(m, (nn.InstanceNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-
-class AtrousSeparableConvolution(nn.Module):
-    """ Atrous Separable Convolution
-    """
-
-    def __init__(self, in_channels, out_channels, kernel_size,
-                 stride=1, padding=0, dilation=1, bias=True):
-        super(AtrousSeparableConvolution, self).__init__()
-        self.body = nn.Sequential(
-            # Separable Conv
-            nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, stride=stride, padding=padding,
-                      dilation=dilation, bias=bias, groups=in_channels),
-            # PointWise Conv
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=bias),
-        )
-
-        self._init_weight()
-
-    def forward(self, x):
-        return self.body(x)
-
-    def _init_weight(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
-            elif isinstance(m, (nn.InstanceNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
 
 
 class ASPPConv(nn.Sequential):
@@ -141,19 +46,6 @@ class ASPPConv(nn.Sequential):
             nn.ReLU(inplace=True)
         ]
         super(ASPPConv, self).__init__(*modules)
-
-
-class ASPPPooling(nn.Sequential):
-    def __init__(self, in_channels, out_channels):
-        super(ASPPPooling, self).__init__(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels, out_channels, 1, bias=False),
-            nn.ReLU(inplace=True))
-
-    def forward(self, x):
-        size = x.shape[-2:]
-        x = super(ASPPPooling, self).forward(x)
-        return F.interpolate(x, size=size, mode='bilinear', align_corners=False)
 
 
 class ASPP(nn.Module):
@@ -211,29 +103,35 @@ class Encoder(nn.Module):
 
 
 class ASPP_SuperPix(nn.Module):
-    def __init__(self, atrous_rates=[2, 4, 8], in_c=5, n_spix=100, n_filters=32, n_layers=4, use_recons=True,
-                 use_last_inorm=True,
-                 image_size=512, useTV=True, useSuperPixRecons=True, levels=3, img_size=256, use_spix_recons=True):
+    def __init__(self, img_size=256, img_channel=1, atrous_rates=[2, 4, 8], n_spix=100, n_filters=32, n_layers=4,
+                 use_cood_input=False, use_recons_output=True,
+                 use_last_inorm=True, use_edge_loss=True, use_recon_loss=True, use_spix_recons_for_loss=True, use_TV=True,):
         super(ASPP_SuperPix, self).__init__()
-        self.in_channels = in_c
-        self.atrous_rates = atrous_rates
-        self.n_spix = n_spix
+        self.img_size = img_size
+        self.use_cood_input = use_cood_input
+        if use_cood_input:
+            in_channels = img_channel + 2
+        else:
+            in_channels = img_channel
+        self.in_channels = in_channels  # img_channel == 3 for RGB, img_channel == 1 for gray, + 2 for pixel location
+        self.atrous_rates = atrous_rates  # dilation rate
+        self.n_spix = n_spix  # number of superpixel
         self.enc_out_channel = n_filters * (2 ** (n_layers - 2))
-        self.out_channels = n_spix
-        self.use_last_inorm = use_last_inorm
-        self.use_recons = use_recons
-        self.use_spix_recons = use_spix_recons
-        self.useSuperPixRecons = useSuperPixRecons
-        self.image_size = image_size
-        self.useTV = useTV
+        self.use_recons_output = use_recons_output
+        if use_recons_output:
+            self.out_channels = n_spix + 3  # + RGB
+        else:
+            self.out_channels = n_spix  # number of superpixel, also output channel
 
+        self.use_last_inorm = use_last_inorm
         if use_last_inorm:
             self.norm = nn.InstanceNorm2d(n_spix, affine=True)
+        self.use_edge_loss = use_edge_loss
+        self.use_recon_loss = use_recon_loss
+        self.use_spix_recons_for_loss = use_spix_recons_for_loss
+        self.use_TV = use_TV
 
-        if use_recons:
-            self.out_channels += 3
-
-        self.encoder = Encoder(in_c, n_filters, n_layers)
+        self.encoder = Encoder(in_channels, n_filters, n_layers)
         self.decoder = ASPP(in_channels=2 * self.enc_out_channel, atrous_rates=atrous_rates,
                             out_channels=self.enc_out_channel)
         self.final = nn.Sequential(
@@ -249,13 +147,14 @@ class ASPP_SuperPix(nn.Module):
         x = torch.cat([x, lap_x], dim=1)
         x = self.decoder(x)
         x = self.final(x)
-        if self.use_recons:
+        if self.use_recons_output:
             recons, spix = x[:, :3], x[:, 3:]
         else:
+            spix = x.clone()
             recons = None
-
         if self.use_last_inorm:
             spix = self.norm(spix)
+
         return spix, recons
 
     def mutual_information(self, logits, coeff):
@@ -317,7 +216,7 @@ class ASPP_SuperPix(nn.Module):
     def imageFromSpix(self, spix, input):
         probs = F.softmax(spix, 1)
         input_img = input[:, :3, :, :]
-        probs = probs.unsqueeze(0)
+        probs = probs.unsqueeze(1)
         votes = input_img[:, :, None, :, :] * probs
         vals = (votes.sum((3, 4)) / probs.sum((3, 4))).unsqueeze(-1).unsqueeze(-1)
         mean_img = (vals * probs[:, None, :, :, :]).sum(3).squeeze(0)
@@ -332,50 +231,69 @@ class ASPP_SuperPix(nn.Module):
 
         return mean_img
 
-    def optimize(self, image, n_iter=500, lr=1e-2, lam=2, alpha=2, beta=2, device="cuda", usecontourLoss=True):
+    def optimize(self, image, n_iter=500, lr=1e-2, lam=2, alpha=2, beta=2, eta=1, device="cuda"):
         input, data_mean, data_std = self.__preprocess(image, device)
         optimizer = optim.Adam(self.parameters(), lr)
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
         input_image = input[:, :3].clone()
+
         for i in range(n_iter):
             optimizer.zero_grad()
-            spix, recons = self.forward(input)
+            if self.use_cood_input:
+                spix, recons = self.forward(input)
+            else:
+                spix, recons = self.forward(input[:, :3, :, :])
             mean_img = self.imageFromSpix(spix, input)
-            loss_mi = self.mutual_information(spix, lam)
-            if self.useTV:
+
+            # clustering loss
+            loss_clustering = self.mutual_information(spix, lam)
+
+            # smoothness loss, only this loss takes location input
+            if self.use_TV:
                 loss_smooth = self.TV_smoothness(spix, input)
             else:
                 loss_smooth = self.smoothness(spix, input)
-                if usecontourLoss:
-                    if self.useSuperPixRecons:
-                        loss_smooth += 0.5 * (
-                                self.ContourLoss(mean_img, input_image) + self.ContourLoss(recons, input_image))
-                    else:
-                        loss_smooth += 0.5 * self.ContourLoss(recons, input_image)
-            loss = loss_mi + alpha * loss_smooth
-            if self.use_recons:
-                if self.useSuperPixRecons:
-                    loss_recon = self.reconstruction(mean_img,
-                                                     input[:, :3]) + self.reconstruction(recons, input[:, :3])
+
+            # edge loss
+            if self.use_edge_loss:
+                if self.use_spix_recons_for_loss:
+                    loss_edge = 0.5 * (self.ContourLoss(mean_img, input_image) + self.ContourLoss(recons, input_image))
                 else:
-                    loss_recon = self.reconstruction(recons, input[:, :3])
-                loss = loss + beta * loss_recon
+                    loss_edge = 0.5 * self.ContourLoss(recons, input_image)
+
+            # recon loss
+            if self.use_recon_loss:
+                if self.use_spix_recons_for_loss:
+                    loss_recon = self.reconstruction(mean_img, input_image) + self.reconstruction(recons, input_image)
+                else:
+                    loss_recon = self.reconstruction(recons, input_image)
+
+            loss = loss_clustering + alpha * loss_smooth + beta * loss_recon + eta * loss_edge
+
             loss.backward()
             optimizer.step()
             scheduler.step()
 
-        print(
-            f"[{i + 1}/{n_iter}] loss {loss.item()}, loss_mi {loss_mi.item()},"
-            f"loss_smooth {loss_smooth.item()}, loss_recon {loss_recon.item()}",
-            flush=True)
+            print(f"[{i + 1}/{n_iter}] loss {loss.item()}, "
+                  f"loss_clustering {loss_clustering.item()}, "
+                  f"loss_smooth {loss_smooth.item()}, "
+                  f"loss_edge {loss_edge.item()}",
+                  f"loss_recon {loss_recon.item()}",
+                  flush=True)
 
-        return self.calc_spixel(image, device), mean_img.detach().cpu(), \
-               input_image.detach().cpu(), data_mean[0, :3].cpu(), data_std[0,
-                                                                   :3].cpu(), recons.detach().cpu()
+        return self.calc_spixel(image, device),\
+               mean_img.detach().cpu(), \
+               input_image.detach().cpu(), \
+               data_mean[0, :3].cpu(), \
+               data_std[0, :3].cpu(), \
+               recons.detach().cpu()
 
     def calc_spixel(self, image, device="cuda"):
         input, _, _ = self.__preprocess(image, device)
-        spix, recons = self.forward(input)
+        if self.use_cood_input:
+            spix, recons = self.forward(input)
+        else:
+            spix, recons = self.forward(input[:, :3, :, :])
 
         spix = spix.argmax(1).squeeze().to("cpu").detach().numpy()
 
@@ -393,38 +311,65 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
     from skimage.segmentation import mark_boundaries
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image", default="./img2.jfif", type=str, help="/path/to/image")
-    parser.add_argument("--n_spix", default=100, type=int, help="number of superpixels")
+    parser.add_argument("--image", default="./sample/GT_01350.png", type=str, help="/path/to/image")
+    parser.add_argument("--img_size", default=256, type=int, help="resolution of image")
+    parser.add_argument("--img_channel", default=3, type=int, help="3 for RGB, 1 for gray")
+
+    parser.add_argument("--atrous_rates", default=[2, 4, 8], type=int, help="dilation rate setting")
+    parser.add_argument("--n_spix", default=128, type=int, help="number of superpixels")
     parser.add_argument("--n_filters", default=32, type=int, help="number of convolution filters")
     parser.add_argument("--n_layers", default=3, type=int, help="number of convolution layers")
+
     parser.add_argument("--lam", default=2, type=float, help="coefficient of marginal entropy")
     parser.add_argument("--alpha", default=2, type=float, help="coefficient of smoothness loss")
     parser.add_argument("--beta", default=2, type=float, help="coefficient of reconstruction loss")
+    parser.add_argument("--eta", default=1, type=float, help="coefficient of edge loss")
+
     parser.add_argument("--lr", default=1e-2, type=float, help="learning rate")
-    parser.add_argument("--n_iter", default=100, type=int, help="number of iterations")
+    parser.add_argument("--n_iter", default=500, type=int, help="number of iterations")
     parser.add_argument("--out_dir", default="./", type=str, help="output directory")
-    parser.add_argument("--img_size", default=128, type=int, help="number of iterations")
-    parser.add_argument("--use_recons", default=True, type=bool, help="if to optimize also for reconstruction")
-    parser.add_argument("--use_spix_recons", default=True, type=bool,
+
+    parser.add_argument("--use_cood_input", default=True, type=bool, help="if to input the location (C+2)")
+    parser.add_argument("--use_recons_output", default=True, type=bool, help="if to optimize also for reconstruction")
+    parser.add_argument("--use_last_inorm", default=True, type=bool, help="if to use last instance norm")
+    parser.add_argument("--use_edge_loss", default=True, type=bool, help="if to use edge loss")
+    parser.add_argument("--use_recon_loss", default=True, type=bool, help="if to use recon loss")
+    parser.add_argument("--use_spix_recons_for_loss", default=True, type=bool,
                         help="if previous is true, then can choose to recons the spix")
-    parser.add_argument("--useTV", default=False, type=bool,
+    parser.add_argument("--use_TV", default=False, type=bool,
                         help="if to use TV smoothness (if false use L2 smoothness)")
-
     args = parser.parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = ASPP_SuperPix(atrous_rates=[2, 4, 8], in_c=5, n_spix=args.n_spix, n_filters=args.n_filters,
-                          n_layers=args.n_layers,
-                          image_size=args.img_size, use_recons=args.use_recons,
-                          useSuperPixRecons=args.use_spix_recons, useTV=args.useTV).to(device)
 
+    # device info
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # load model
+    model = ASPP_SuperPix(img_size=args.img_size,
+                          img_channel=args.img_channel,
+                          atrous_rates=args.atrous_rates,
+                          n_spix=args.n_spix,
+                          n_filters=args.n_filters,
+                          n_layers=args.n_layers,
+                          use_cood_input=args.use_cood_input,
+                          use_recons_output=args.use_recons_output,
+                          use_last_inorm=args.use_last_inorm,
+                          use_edge_loss=args.use_edge_loss,
+                          use_recon_loss=args.use_recon_loss,
+                          use_spix_recons_for_loss=args.use_spix_recons_for_loss,
+                          use_TV=args.use_TV).to(device)
+
+    # load image
     if args.image is None:  # load sample image from scipy
         import scipy.misc
         img = scipy.misc.face()
     else:
         img = plt.imread(args.image)
+        if len(img.shape) == 2:
+            img = np.repeat(img[:, :, np.newaxis], 3, axis=-1)
 
-    img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0) / 255
+    img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
     img = F.interpolate(img.float(), size=args.img_size, mode='bilinear', align_corners=False)
     img = img.squeeze().permute(1, 2, 0)
 
@@ -434,6 +379,7 @@ if __name__ == "__main__":
                                                                      args.lam,
                                                                      args.alpha,
                                                                      args.beta,
+                                                                     args.eta,
                                                                      device)
 
     input_tensor = UnNormalize(mean, std)(input_tensor).squeeze().transpose(0, 2).transpose(0, 1)  #
