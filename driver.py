@@ -210,7 +210,7 @@ class ASPP_SuperPix(nn.Module):
         input = torch.cat([image, coord], 1).to(device)
         data_mean = input.mean((2, 3), keepdim=False)
         data_std = input.std((2, 3), keepdim=False)
-        input = (input - input.mean((2, 3), keepdim=True)) / input.std((2, 3), keepdim=True)
+        input = (input - input.mean((2, 3), keepdim=True)) / input.std((2, 3), keepdim=True)  # channel-wise standardisation
         return input, data_mean, data_std
 
     def imageFromSpix(self, spix, input):
